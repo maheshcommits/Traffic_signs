@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashcam Sign Classifier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Deep Learning &amp; Computer Vision</p>
+    <h1>An Intelligent System to Classify Road Traffic Signs from Dashcam Images</h1>
+    <p class="lede">A CNN classifier reads each traffic sign in the dashcam frame and passes the result to an ADAS driver-assist module that turns it into a speed or hazard alert. The prototype below runs the full loop on a simulated drive.</p>
+    <dl class="meta">
+      <div><dt>Student</dt><dd>Budumuri Mahesh</dd></div>
+      <div><dt>Roll no.</dt><dd>23ME1A5470</dd></div>
+      <div><dt>Guide</dt><dd>Mrs. P. Neeraja</dd></div>
+      <div><dt>Dataset</dt><dd>GTSRB</dd></div>
+    </dl>
+  </header>
+
+  <section class="demo" aria-label="Live prototype">
+    <div class="left">
+      <div class="view card">
+        <canvas id="cam" width="640" height="360" role="img" aria-label="Simulated dashcam view of a road with a traffic sign approaching"></canvas>
+      </div>
+      <div class="card controls">
+        <div class="ctl">
+          <label class="lab" for="sel-sign">Sign shown</label>
+          <select id="sel-sign"><option value="random" selected>Random</option></select>
+        </div>
+        <div class="ctl">
+          <span class="lab" id="cond-lab">Conditions</span>
+          <div class="seg" role="group" aria-labelledby="cond-lab" id="cond">
+            <button type="button" data-c="day" aria-pressed="true">Day</button>
+            <button type="button" data-c="night" aria-pressed="false">Night</button>
+            <button type="button" data-c="fog" aria-pressed="false">Fog</button>
+            <button type="button" data-c="rain" aria-pressed="false">Rain</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <div class="row"><label class="lab" for="in-speed">Vehicle speed</label><output id="out-speed" for="in-speed">55 km/h</output></div>
+          <input type="range" id="in-speed" min="10" max="120" step="1" value="55">
+        </div>
+        <div class="ctl">
+          <div class="row"><label class="lab" for="in-dist">Distance to sign</label><output id="out-dist" for="in-dist">30 m</output></div>
+          <input type="range" id="in-dist" min="8" max="85" step="0.5" value="30">
+        </div>
+        <div class="ctl">
+          <div class="row"><label class="lab" for="in-noise">Sensor noise</label><output id="out-noise" for="in-noise">5</output></div>
+          <input type="range" id="in-noise" min="0" max="40" step="1" value="5">
+        </div>
+        <div class="ctl">
+          <div class="row"><label class="lab" for="in-blur">Motion blur</label><output id="out-blur" for="in-blur">0</output></div>
+          <input type="range" id="in-blur" min="0" max="3" step="0.5" value="0">
+        </div>
+        <div class="ctl">
+          <label class="lab" for="sel-rate">Playback speed</label>
+          <select id="sel-rate">
+            <option value="0.25">0.25x slow motion</option>
+            <option value="0.5" selected>0.5x</option>
+            <option value="1">1x real time</option>
+          </select>
+        </div>
+        <div class="ctl btns">
+          <button type="button" class="btn primary" id="btn-play">Pause</button>
+          <button type="button" class="btn" id="btn-next">Next sign</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="card panel" aria-label="ADAS driver assist">
+      <div class="panel-head"><h2>Driver assist</h2><span class="chip" id="chip" data-s="idle">Scanning</span></div>
+      <div class="alert" id="alert" data-sev="idle" aria-live="polite">
+        <canvas id="mini" width="96" height="96" aria-hidden="true"></canvas>
+        <div><p class="a-title" id="a-title">Scanning the road</p><p class="a-body" id="a-body">No sign ahead.</p></div>
+      </div>
+      <div>
+        <div class="speed-top"><span>Vehicle <b id="v-now">55 km/h</b></span><span id="v-lim">No limit seen yet</span></div>
+        <div class="track"><div class="fill" id="v-fill"></div><div class="mark" id="v-mark" hidden></div></div>
+        <div class="scale"><span>0</span><span>65</span><span>130 km/h</span></div>
+      </div>
+      <div class="probs">
+        <h3>Class probabilities</h3>
+        <ol id="probs"></ol>
+      </div>
+      <div class="confirm">
+        <div class="row"><span class="lab">Frames to confirm</span><span class="lab" id="dist-read">Distance 30.0 m</span></div>
+        <div class="pips" id="pips"></div>
+        <p class="rule" style="margin-top:8px">An alert fires after 8 stable frames at 70% confidence or higher. Classification starts about 26 m from the sign.</p>
+      </div>
+    </aside>
+  </section>
+
+  <section class="sec" aria-labelledby="h-pipe">
+    <div class="sec-head"><h2 id="h-pipe">What the classifier sees</h2><p>Each frame goes through the same four stages. The panels update live.</p></div>
+    <div class="pipe">
+      <figure class="card stage"><span class="lab"><b>1</b> Capture</span><div class="box"><canvas id="s1" width="160" height="90"></canvas></div><p>Dashcam frame with sensor noise and weather applied.</p></figure>
+      <figure class="card stage"><span class="lab"><b>2</b> Crop sign</span><div class="box"><canvas id="s2" width="64" height="64"></canvas></div><p>Region around the sign taken from the frame.</p></figure>
+      <figure class="card stage"><span class="lab"><b>3</b> Normalise</span><div class="box"><canvas id="s3" class="px" width="32" height="32" style="height:100%;aspect-ratio:1"></canvas></div><p>Resized to 32 x 32 pixels, the CNN input size.</p></figure>
+      <figure class="card stage"><span class="lab"><b>4</b> Classify</span><div class="box"><div class="top-label" id="s4">No sign in range</div></div><p id="s4p">Softmax scores over the sign classes.</p></figure>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-log">
+    <div class="sec-head"><h2 id="h-log">Session log</h2><p>The simulator knows which sign it showed, so every pass is scored.</p></div>
+    <div class="card">
+      <dl class="stats">
+        <div><dt>Signs passed</dt><dd id="st-total">0</dd></div>
+        <div><dt>Correct</dt><dd id="st-ok">0</dd></div>
+        <div><dt>Session accuracy</dt><dd id="st-acc">n/a</dd></div>
+        <div><dt>Avg. confirm distance</dt><dd id="st-dist">n/a</dd></div>
+      </dl>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>Time</th><th>Sign shown</th><th>Recognised</th><th class="num">Confidence</th><th class="num">Confirmed at</th><th>Result</th></tr></thead>
+          <tbody id="log"><tr><td class="empty" colspan="6">Waiting for the first sign to pass. Each pass adds a row here.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-proj">
+    <div class="sec-head"><h2 id="h-proj">Project sheet</h2></div>
+    <div class="sheet">
+      <div class="card">
+        <h3>Abstract</h3>
+        <p>This project proposes a CNN classifier to classify road traffic signs from dashcam images, addressing the problem of traffic sign recognition through a data-driven approach. Data collected from the GTSRB traffic-sign dataset is cleaned, transformed, and used to build and evaluate the underlying model. The outcome is delivered as an ADAS driver-assist module, enabling practical adoption beyond the classroom.</p>
+        <div class="tags"><span>traffic</span><span>sign</span><span>recognition</span><span>cnn</span><span>classifier</span><span>deep learning</span></div>
+      </div>
+      <div class="card">
+        <h3>GTSRB dataset</h3>
+        <ul class="facts">
+          <li><span>Sign classes</span><b>43</b></li>
+          <li><span>Training images</span><b>39,209</b></li>
+          <li><span>Test images</span><b>12,630</b></li>
+          <li><span>Image size range</span><b>about 15 x 15 to 250 x 250 px</b></li>
+          <li><span>Planned test accuracy target</span><b>95% or higher</b></li>
+        </ul>
+      </div>
+      <div class="card arch">
+        <h3>Planned CNN architecture</h3>
+        <div class="tbl">
+          <table>
+            <thead><tr><th>Layer</th><th>Output shape</th><th class="num">Parameters</th></tr></thead>
+            <tbody>
+              <tr><td>Input, RGB crop</td><td class="mono">32 x 32 x 3</td><td class="num mono">0</td></tr>
+              <tr><td>Conv 3x3, 32 filters, ReLU</td><td class="mono">32 x 32 x 32</td><td class="num mono">896</td></tr>
+              <tr><td>Conv 3x3, 32 filters, ReLU</td><td class="mono">32 x 32 x 32</td><td class="num mono">9,248</td></tr>
+              <tr><td>Max-pool 2x2, dropout 0.25</td><td class="mono">16 x 16 x 32</td><td class="num mono">0</td></tr>
+              <tr><td>Conv 3x3, 64 filters, ReLU</td><td class="mono">16 x 16 x 64</td><td class="num mono">18,496</td></tr>
+              <tr><td>Conv 3x3, 64 filters, ReLU</td><td class="mono">16 x 16 x 64</td><td class="num mono">36,928</td></tr>
+              <tr><td>Max-pool 2x2, dropout 0.25</td><td class="mono">8 x 8 x 64</td><td class="num mono">0</td></tr>
+              <tr><td>Flatten</td><td class="mono">4,096</td><td class="num mono">0</td></tr>
+              <tr><td>Dense 256, ReLU, dropout 0.5</td><td class="mono">256</td><td class="num mono">1,048,832</td></tr>
+              <tr><td>Dense 43, softmax</td><td class="mono">43</td><td class="num mono">11,051</td></tr>
+              <tr><td><b>Total</b></td><td></td><td class="num mono"><b>1,125,451</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card note">
+        <h3>What this prototype is</h3>
+        <p>The drive is simulated and the sign position comes from the simulator. The recogniser here is a template-matching stand-in that takes the same 32 x 32 crop and returns class probabilities, covering 14 of the 43 GTSRB classes. Once the CNN above is trained on GTSRB and exported, it replaces the classify step and the rest of the page stays the same.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">Prototype for academic demonstration. Alerts are advisory and not a substitute for driver judgement.</p>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
